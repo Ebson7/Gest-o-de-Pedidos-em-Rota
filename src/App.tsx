@@ -110,9 +110,10 @@ export default function App() {
   const handleExport = () => {
     if (results.length === 0) return;
     
-    const exportData = results.map(({ VALOR, ...item }) => ({
-      ...item,
-      DATA: typeof item.DATA === 'number' ? XLSX.SSF.format('dd/mm/yyyy', item.DATA) : item.DATA
+    const exportData = results.map((item) => ({
+      "Número do Pedido": item.PEDIDO || "-",
+      "Nome do Cliente": item.CLIENTE || "-",
+      "Cidade": item.CIDADE || "-"
     }));
 
     const worksheet = XLSX.utils.json_to_sheet(exportData);

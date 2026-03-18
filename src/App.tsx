@@ -316,7 +316,7 @@ function App() {
     
     const exportData = results.map((item) => ({
       "Número do Pedido": item.PEDIDO || "-",
-      "Nome do Cliente": item.CLIENTE || "-",
+      "Nome do Cliente": item.CLIENTE ? (String(item.CLIENTE).length > 25 ? String(item.CLIENTE).substring(0, 25) : String(item.CLIENTE)) : "-",
       "Cidade": item.CIDADE || "-"
     }));
 

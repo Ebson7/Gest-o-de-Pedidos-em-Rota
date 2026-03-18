@@ -1,0 +1,5 @@
+{
+  "name": "Consulta de Pedidos Excel",
+  "description": "Aplicativo para consulta online de dados de pedidos carregados via Excel diariamente.",
+  "requestFramePermissions": []
+}

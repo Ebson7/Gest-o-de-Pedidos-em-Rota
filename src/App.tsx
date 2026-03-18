@@ -140,10 +140,16 @@ export default function App() {
       });
       const data = await response.json();
       if (response.ok) {
-        setSyncStatus({ success: true, message: "Sincronizado com sucesso!" });
+        setSyncStatus({ success: true, message: `Sincronizado com sucesso! (${data.count} registros)` });
         fetchStats();
       } else {
-        setSyncStatus({ success: false, message: data.error || "Erro ao sincronizar." });
+        const errorMsg = data.error || "Erro ao sincronizar.";
+        setSyncStatus({ 
+          success: false, 
+          message: errorMsg.includes("401") || errorMsg.includes("403") 
+            ? "Planilha privada! Mude para 'Qualquer pessoa com o link'." 
+            : errorMsg 
+        });
       }
     } catch (error) {
       setSyncStatus({ success: false, message: "Erro de conexão." });

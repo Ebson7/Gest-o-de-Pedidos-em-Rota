@@ -57,25 +57,41 @@ async function startServer() {
     if (!url) return res.status(400).json({ error: "URL is required" });
 
     try {
+      console.log("Original URL:", url);
       // Transform standard Google Sheets URL to CSV export URL
       let exportUrl = url;
       if (url.includes("docs.google.com/spreadsheets")) {
-        if (url.includes("/pub?")) {
-          // Already a published link, ensure it's CSV
-          if (!url.includes("output=csv")) {
-            exportUrl = url.includes("?") ? `${url}&output=csv` : `${url}?output=csv`;
+        if (url.includes("/pubhtml") || url.includes("/pub?")) {
+          // Published link
+          exportUrl = url.replace("/pubhtml", "/pub").split("?")[0] + "?output=csv";
+          if (url.includes("gid=")) {
+            const gidMatch = url.match(/gid=([0-9]+)/);
+            if (gidMatch) exportUrl += `&gid=${gidMatch[1]}`;
           }
         } else {
           // Standard edit link
           const match = url.match(/\/d\/(.+?)(\/|$)/);
           if (match && match[1]) {
             exportUrl = `https://docs.google.com/spreadsheets/d/${match[1]}/export?format=csv`;
+            // Preserve gid if present
+            const gidMatch = url.match(/gid=([0-9]+)/);
+            if (gidMatch) exportUrl += `&gid=${gidMatch[1]}`;
           }
         }
       }
+      
+      console.log("Export URL:", exportUrl);
 
-      const response = await fetch(exportUrl);
-      if (!response.ok) throw new Error("Failed to fetch Google Sheet");
+      const response = await fetch(exportUrl, {
+        headers: {
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
+        }
+      });
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error("Fetch failed:", response.status, errorText);
+        throw new Error(`Failed to fetch Google Sheet: ${response.status} ${response.statusText}`);
+      }
 
       const arrayBuffer = await response.arrayBuffer();
       const buffer = Buffer.from(arrayBuffer);

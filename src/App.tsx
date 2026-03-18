@@ -544,7 +544,7 @@ function App() {
               <FileSpreadsheet className="text-white w-6 h-6" />
             </div>
             <h1 className="text-xl font-bold tracking-tight text-[#0F172A]">
-              Consulta <span className="text-blue-600">Pedidos</span>
+              Gestao <span className="text-blue-600">Rotas</span>
             </h1>
           </div>
           

@@ -1,5 +1,5 @@
 {
-  "name": "Consulta de Pedidos Excel",
+  "name": "Gestao Rotas",
   "description": "Aplicativo para consulta online de dados de pedidos carregados via Excel diariamente.",
   "requestFramePermissions": []
 }

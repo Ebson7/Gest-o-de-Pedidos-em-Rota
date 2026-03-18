@@ -55,7 +55,7 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
   }
   console.error('Firestore Error: ', JSON.stringify(errInfo));
   // Only throw if it's NOT a permission error that we can handle gracefully
-  if (errInfo.error.includes("Missing or insufficient permissions")) {
+  if (errInfo.error.toLowerCase().includes("permission") || errInfo.error.toLowerCase().includes("insufficient")) {
     return; // Don't crash the app for permission errors, just log them
   }
   throw new Error(JSON.stringify(errInfo));
@@ -147,9 +147,10 @@ function App() {
   const [loginError, setLoginError] = useState("");
   const [activeTab, setActiveTab] = useState<"search" | "admin">("search");
   const [searchQuery, setSearchQuery] = useState("");
-  const [searchField, setSearchField] = useState("PEDIDO");
+  const [searchField, setSearchField] = useState("");
   const [results, setResults] = useState<OrderData[]>([]);
   const [loading, setLoading] = useState(false);
+  const [isDatabaseEmpty, setIsDatabaseEmpty] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [sheetsUrl, setSheetsUrl] = useState("");
   const [syncStatus, setSyncStatus] = useState<{ success?: boolean; message?: string } | null>(null);
@@ -230,6 +231,17 @@ function App() {
     }
 
     const unsubscribe = onSnapshot(q, (snapshot) => {
+      if (!auth.currentUser) return;
+      console.log(`Snapshot recebido: ${snapshot.size} documentos encontrados.`);
+      
+      if (snapshot.empty) {
+        setIsDatabaseEmpty(true);
+        setResults([]);
+        setLoading(false);
+        return;
+      }
+
+      setIsDatabaseEmpty(false);
       let data = snapshot.docs.map(doc => doc.data() as OrderData);
       
       if (queryStr) {
@@ -350,7 +362,22 @@ function App() {
 
       const text = await response.text();
       const workbook = XLSX.read(text, { type: "string" });
-      const jsonData = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { defval: "" });
+      const rawData = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { defval: "" }) as any[];
+
+      // Normalizar chaves para maiúsculas e valores importantes para string
+      const jsonData = rawData.map(item => {
+        const newItem: any = {};
+        Object.keys(item).forEach(key => {
+          const upperKey = key.toUpperCase().trim();
+          let value = item[key];
+          // Normalizar campos de busca para string
+          if (["PEDIDO", "VENDEDOR", "LOTE", "CLIENTE", "CIDADE"].includes(upperKey)) {
+            value = value !== undefined && value !== null ? String(value).trim() : "";
+          }
+          newItem[upperKey] = value;
+        });
+        return newItem;
+      });
 
       await saveOrdersToFirestore(jsonData);
       setSyncStatus({ success: true, message: `Sincronizado com sucesso! (${jsonData.length} registros)` });
@@ -405,7 +432,21 @@ function App() {
           const workbook = XLSX.read(bstr, { type: "binary" });
           const sheetName = workbook.SheetNames[0];
           const worksheet = workbook.Sheets[sheetName];
-          const jsonData = XLSX.utils.sheet_to_json(worksheet);
+          const rawData = XLSX.utils.sheet_to_json(worksheet) as any[];
+
+          // Normalizar chaves para maiúsculas e valores importantes para string
+          const jsonData = rawData.map(item => {
+            const newItem: any = {};
+            Object.keys(item).forEach(key => {
+              const upperKey = key.toUpperCase().trim();
+              let value = item[key];
+              if (["PEDIDO", "VENDEDOR", "LOTE", "CLIENTE", "CIDADE"].includes(upperKey)) {
+                value = value !== undefined && value !== null ? String(value).trim() : "";
+              }
+              newItem[upperKey] = value;
+            });
+            return newItem;
+          });
 
           await saveOrdersToFirestore(jsonData);
           setMessage({ type: "success", text: `Sucesso! ${jsonData.length} registros carregados.` });
@@ -603,7 +644,6 @@ function App() {
                       value={searchQuery}
                       onChange={(e) => {
                         setSearchQuery(e.target.value);
-                        handleSearch(e.target.value, searchField);
                       }}
                     />
                   </div>
@@ -614,7 +654,6 @@ function App() {
                       value={searchField}
                       onChange={(e) => {
                         setSearchField(e.target.value);
-                        handleSearch(searchQuery, e.target.value);
                       }}
                     >
                       <option value="">Todos os campos</option>
@@ -654,7 +693,7 @@ function App() {
                         <tr>
                           <td colSpan={7} className="px-6 py-12 text-center">
                             <Loader2 className="w-8 h-8 text-blue-600 animate-spin mx-auto mb-2" />
-                            <p className="text-[#64748B] font-medium">Buscando dados...</p>
+                            <p className="text-[#64748B] font-medium">Buscando dados no servidor...</p>
                           </td>
                         </tr>
                       ) : results.length > 0 ? (
@@ -663,7 +702,7 @@ function App() {
                             key={idx}
                             initial={{ opacity: 0 }}
                             animate={{ opacity: 1 }}
-                            transition={{ delay: idx * 0.02 }}
+                            transition={{ delay: Math.min(idx * 0.01, 0.5) }}
                             className="hover:bg-[#F8FAFC] transition-colors group cursor-pointer"
                           >
                             <td className="px-6 py-4">
@@ -691,7 +730,7 @@ function App() {
                                 </div>
                                 <div className="flex flex-col max-w-[200px]">
                                   <span className="font-medium text-[#1E293B] truncate">
-                                    {item.CLIENTE ? (item.CLIENTE.length > 25 ? item.CLIENTE.substring(0, 25) + "..." : item.CLIENTE) : "N/A"}
+                                    {item.CLIENTE ? (String(item.CLIENTE).length > 25 ? String(item.CLIENTE).substring(0, 25) + "..." : item.CLIENTE) : "N/A"}
                                   </span>
                                   <span className="text-xs text-[#64748B] truncate">{item.CANAL || "-"}</span>
                                 </div>
@@ -729,8 +768,12 @@ function App() {
                             <div className="bg-slate-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
                               <AlertCircle className="text-slate-400 w-8 h-8" />
                             </div>
-                            <p className="text-[#64748B] font-medium">Nenhum registro encontrado.</p>
-                            <p className="text-xs text-[#94A3B8]">Tente ajustar sua busca ou filtros.</p>
+                            <p className="text-[#64748B] font-medium">
+                              {isDatabaseEmpty ? "O banco de dados está vazio. Vá em 'Upload' para carregar dados." : "Nenhum registro encontrado para esta busca."}
+                            </p>
+                            <p className="text-xs text-[#94A3B8]">
+                              {isDatabaseEmpty ? "Use um arquivo Excel ou link do Google Sheets." : "Tente remover os filtros ou pesquisar por outro termo."}
+                            </p>
                           </td>
                         </tr>
                       )}

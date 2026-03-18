@@ -1,37 +1,53 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Helper functions
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
     function isAuthenticated() {
       return request.auth != null;
     }
-    
+
     function isAdmin() {
-      return isAuthenticated() && 
+      return isAuthenticated() &&
         (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
-         (request.auth.token.email == "ebsonsilva7@gmail.com" && request.auth.token.email_verified == true));
+          (request.auth.token.email == "ebsonsilva7@gmail.com" && request.auth.token.email_verified == true)); // Default admin
     }
 
-    function isOwner(userId) {
-      return isAuthenticated() && request.auth.uid == userId;
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+    function isValidOrder(data) {
+      return data.keys().hasAll(['PEDIDO', 'CLIENTE']) &&
+             data.PEDIDO is string && data.PEDIDO.size() < 100 &&
+             data.CLIENTE is string && data.CLIENTE.size() < 200;
     }
+
+    function isValidStats(data) {
+      return data.keys().hasAll(['totalRecords', 'lastUpdated']) &&
+             data.totalRecords is number &&
+             data.lastUpdated is string;
+    }
+
+    // ===============================================================
+    // Rules
+    // ===============================================================
 
     // Orders collection
     match /orders/{orderId} {
       allow read: if isAuthenticated();
-      allow write: if isAdmin();
+      allow write: if isAuthenticated() && isValidOrder(request.resource.data);
     }
 
     // Stats document
     match /stats/{docId} {
       allow read: if isAuthenticated();
-      allow write: if isAdmin();
+      allow write: if isAuthenticated() && isValidStats(request.resource.data);
     }
 
-    // Users collection
-    match /users/{userId} {
-      allow read: if isAuthenticated();
-      allow write: if isAdmin() || isOwner(userId);
+    // Default deny for everything else
+    match /{document=**} {
+      allow read, write: if false;
     }
   }
 }

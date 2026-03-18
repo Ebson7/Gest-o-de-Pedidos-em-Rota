@@ -2,9 +2,60 @@ import React, { useState, useEffect, useCallback } from "react";
 import { Search, Upload, FileSpreadsheet, Package, MapPin, User, DollarSign, Calendar, AlertCircle, CheckCircle2, Loader2, ChevronRight, ChevronLeft, Filter, Download, Lock, LogOut, RefreshCw } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import * as XLSX from "xlsx";
-import { auth, db, loginWithGoogle } from "./firebase";
+import { auth, db, loginAnonymously } from "./firebase";
 import { onAuthStateChanged, signOut, User as FirebaseUser } from "firebase/auth";
-import { collection, query, where, onSnapshot, limit, orderBy, doc, getDoc } from "firebase/firestore";
+import { collection, query, where, onSnapshot, limit, doc, getDoc, getDocFromServer } from "firebase/firestore";
+
+enum OperationType {
+  CREATE = 'create',
+  UPDATE = 'update',
+  DELETE = 'delete',
+  LIST = 'list',
+  GET = 'get',
+  WRITE = 'write',
+}
+
+interface FirestoreErrorInfo {
+  error: string;
+  operationType: OperationType;
+  path: string | null;
+  authInfo: {
+    userId: string | undefined;
+    email: string | null | undefined;
+    emailVerified: boolean | undefined;
+    isAnonymous: boolean | undefined;
+    tenantId: string | null | undefined;
+    providerInfo: {
+      providerId: string;
+      displayName: string | null;
+      email: string | null;
+      photoUrl: string | null;
+    }[];
+  }
+}
+
+function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  const errInfo: FirestoreErrorInfo = {
+    error: error instanceof Error ? error.message : String(error),
+    authInfo: {
+      userId: auth.currentUser?.uid,
+      email: auth.currentUser?.email,
+      emailVerified: auth.currentUser?.emailVerified,
+      isAnonymous: auth.currentUser?.isAnonymous,
+      tenantId: auth.currentUser?.tenantId,
+      providerInfo: auth.currentUser?.providerData.map(provider => ({
+        providerId: provider.providerId,
+        displayName: provider.displayName,
+        email: provider.email,
+        photoUrl: provider.photoURL
+      })) || []
+    },
+    operationType,
+    path
+  }
+  console.error('Firestore Error: ', JSON.stringify(errInfo));
+  throw new Error(JSON.stringify(errInfo));
+}
 
 interface OrderData {
   ROTA?: string;
@@ -57,16 +108,23 @@ export default function App() {
     const unsubscribe = onAuthStateChanged(auth, (u) => {
       setFbUser(u);
       setIsAuthReady(true);
+      
       if (u) {
-        // Check if user is admin based on email or role in Firestore
-        // For now, we'll use the email from the runtime context as default admin
-        if (u.email === "ebsonsilva7@gmail.com") {
-          setUser({ role: "admin" });
-        } else {
-          setUser({ role: "vendedor", vendorCode: u.uid }); // Default to vendor
-        }
-      } else {
-        setUser(null);
+        // Test connection
+        const testConnection = async () => {
+          try {
+            await getDocFromServer(doc(db, 'test', 'connection'));
+          } catch (error) {
+            if(error instanceof Error && error.message.includes('the client is offline')) {
+              console.error("Please check your Firebase configuration. The client is offline.");
+              setMessage({ 
+                type: "error", 
+                text: "Erro de conexão: O banco de dados Firestore não foi encontrado ou a configuração está incorreta. Verifique se você criou o banco de dados no Console do Firebase." 
+              });
+            }
+          }
+        };
+        testConnection();
       }
     });
     return () => unsubscribe();
@@ -82,13 +140,14 @@ export default function App() {
 
   const fetchStats = useCallback(async () => {
     if (!fbUser) return;
+    const path = "stats/global";
     try {
       const statsDoc = await getDoc(doc(db, "stats", "global"));
       if (statsDoc.exists()) {
         setStats(statsDoc.data() as Stats);
       }
     } catch (e) {
-      console.error("Failed to fetch stats", e);
+      handleFirestoreError(e, OperationType.GET, path);
     }
   }, [fbUser]);
 
@@ -120,7 +179,7 @@ export default function App() {
       setResults(data);
       setLoading(false);
     }, (error) => {
-      console.error("Search failed", error);
+      handleFirestoreError(error, OperationType.LIST, "orders");
       setLoading(false);
     });
 
@@ -131,16 +190,34 @@ export default function App() {
     e.preventDefault();
     setLoginError("");
 
-    try {
-      await loginWithGoogle();
-    } catch (error) {
-      setLoginError("Falha ao entrar com Google.");
+    if (password === "@adminMarsil2026") {
+      try {
+        await loginAnonymously();
+        setUser({ role: "admin" });
+      } catch (error) {
+        setLoginError("Erro ao conectar ao servidor.");
+      }
+    } else if (password.toLowerCase().startsWith("marsil-")) {
+      const parts = password.split("-");
+      if (parts.length >= 2 && parts[1].trim()) {
+        try {
+          await loginAnonymously();
+          setUser({ role: "vendedor", vendorCode: parts[1].trim() });
+        } catch (error) {
+          setLoginError("Erro ao conectar ao servidor.");
+        }
+      } else {
+        setLoginError("Senha de vendedor inválida. Use marsil-CÓDIGO.");
+      }
+    } else {
+      setLoginError("Senha incorreta.");
     }
   };
 
   const handleLogout = async () => {
     await signOut(auth);
     setUser(null);
+    setPassword("");
     setResults([]);
     setActiveTab("search");
   };
@@ -212,23 +289,28 @@ export default function App() {
   const saveOrdersToFirestore = async (orders: any[]) => {
     const { writeBatch, doc, collection } = await import("firebase/firestore");
     const batchSize = 500;
-    for (let i = 0; i < orders.length; i += batchSize) {
-      const batch = writeBatch(db);
-      const chunk = orders.slice(i, i + batchSize);
-      chunk.forEach((order, index) => {
-        const orderId = order.PEDIDO ? String(order.PEDIDO) : `order_${i + index}_${Date.now()}`;
-        const docRef = doc(collection(db, "orders"), orderId);
-        batch.set(docRef, order);
+    const path = "orders";
+    try {
+      for (let i = 0; i < orders.length; i += batchSize) {
+        const batch = writeBatch(db);
+        const chunk = orders.slice(i, i + batchSize);
+        chunk.forEach((order, index) => {
+          const orderId = order.PEDIDO ? String(order.PEDIDO) : `order_${i + index}_${Date.now()}`;
+          const docRef = doc(collection(db, "orders"), orderId);
+          batch.set(docRef, order);
+        });
+        await batch.commit();
+      }
+      
+      const statsRef = doc(db, "stats", "global");
+      const { setDoc } = await import("firebase/firestore");
+      await setDoc(statsRef, {
+        totalRecords: orders.length,
+        lastUpdated: new Date().toISOString()
       });
-      await batch.commit();
+    } catch (e) {
+      handleFirestoreError(e, OperationType.WRITE, path);
     }
-    
-    const statsRef = doc(db, "stats", "global");
-    const { setDoc } = await import("firebase/firestore");
-    await setDoc(statsRef, {
-      totalRecords: orders.length,
-      lastUpdated: new Date().toISOString()
-    });
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -289,10 +371,22 @@ export default function App() {
               <Lock className="text-white w-8 h-8" />
             </div>
             <h1 className="text-3xl font-bold text-[#0F172A]">Acesso Restrito</h1>
-            <p className="text-[#64748B]">Entre com sua conta Google para acessar o sistema Marsil.</p>
+            <p className="text-[#64748B]">Entre com sua senha para acessar o sistema Marsil.</p>
           </div>
 
-          <div className="space-y-6">
+          <form onSubmit={handleLogin} className="space-y-6">
+            <div className="space-y-2">
+              <label className="text-sm font-bold text-[#1E293B] ml-1">Senha</label>
+              <input
+                type="password"
+                placeholder="Sua senha de acesso"
+                className="w-full px-6 py-4 bg-[#F8FAFC] border border-[#E2E8F0] rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none transition-all text-lg"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                autoFocus
+              />
+            </div>
+
             {loginError && (
               <motion.div 
                 initial={{ opacity: 0, y: -10 }}
@@ -305,13 +399,12 @@ export default function App() {
             )}
 
             <button
-              onClick={handleLogin}
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white py-4 rounded-2xl font-bold text-lg shadow-lg shadow-blue-200 transition-all active:scale-[0.98] flex items-center justify-center gap-3"
+              type="submit"
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white py-4 rounded-2xl font-bold text-lg shadow-lg shadow-blue-200 transition-all active:scale-[0.98]"
             >
-              <User className="w-6 h-6" />
-              Entrar com Google
+              Entrar no Sistema
             </button>
-          </div>
+          </form>
 
           <div className="pt-4 text-center">
             <p className="text-xs text-[#94A3B8]">

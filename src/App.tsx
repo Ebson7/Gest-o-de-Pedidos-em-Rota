@@ -2,6 +2,9 @@ import React, { useState, useEffect, useCallback } from "react";
 import { Search, Upload, FileSpreadsheet, Package, MapPin, User, DollarSign, Calendar, AlertCircle, CheckCircle2, Loader2, ChevronRight, ChevronLeft, Filter, Download, Lock, LogOut, RefreshCw } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import * as XLSX from "xlsx";
+import { auth, db, loginWithGoogle } from "./firebase";
+import { onAuthStateChanged, signOut, User as FirebaseUser } from "firebase/auth";
+import { collection, query, where, onSnapshot, limit, orderBy, doc, getDoc } from "firebase/firestore";
 
 interface OrderData {
   ROTA?: string;
@@ -33,6 +36,8 @@ interface AuthUser {
 }
 
 export default function App() {
+  const [fbUser, setFbUser] = useState<FirebaseUser | null>(null);
+  const [isAuthReady, setIsAuthReady] = useState(false);
   const [user, setUser] = useState<AuthUser | null>(null);
   const [password, setPassword] = useState("");
   const [loginError, setLoginError] = useState("");
@@ -47,6 +52,26 @@ export default function App() {
   const [stats, setStats] = useState<Stats>({ totalRecords: 0, lastUpdated: null });
   const [message, setMessage] = useState<{ type: "success" | "error"; text: string } | null>(null);
 
+  // Auth listener
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, (u) => {
+      setFbUser(u);
+      setIsAuthReady(true);
+      if (u) {
+        // Check if user is admin based on email or role in Firestore
+        // For now, we'll use the email from the runtime context as default admin
+        if (u.email === "ebsonsilva7@gmail.com") {
+          setUser({ role: "admin" });
+        } else {
+          setUser({ role: "vendedor", vendorCode: u.uid }); // Default to vendor
+        }
+      } else {
+        setUser(null);
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
   const filteredStats = React.useMemo(() => {
     const uniqueCities = new Set(results.map(r => r.CIDADE).filter(Boolean));
     return {
@@ -56,53 +81,66 @@ export default function App() {
   }, [results]);
 
   const fetchStats = useCallback(async () => {
+    if (!fbUser) return;
     try {
-      const res = await fetch("/api/stats");
-      const data = await res.json();
-      setStats(data);
+      const statsDoc = await getDoc(doc(db, "stats", "global"));
+      if (statsDoc.exists()) {
+        setStats(statsDoc.data() as Stats);
+      }
     } catch (e) {
       console.error("Failed to fetch stats", e);
     }
-  }, []);
+  }, [fbUser]);
 
-  const handleSearch = useCallback(async (query: string, field: string) => {
+  const handleSearch = useCallback((queryStr: string, field: string) => {
+    if (!fbUser) return;
     setLoading(true);
-    try {
-      let url = `/api/data?search=${encodeURIComponent(query)}&field=${field}`;
-      if (user?.role === "vendedor" && user.vendorCode) {
-        url += `&restrictVendor=${encodeURIComponent(user.vendorCode)}`;
-      }
-      const res = await fetch(url);
-      const data = await res.json();
-      setResults(data);
-    } catch (e) {
-      console.error("Search failed", e);
-    } finally {
-      setLoading(false);
+    
+    let q = query(collection(db, "orders"), limit(500));
+    
+    if (user?.role === "vendedor" && user.vendorCode) {
+      // If the vendor code was manually entered, we use it, otherwise we might use UID
+      // For now, let's stick to the vendor code logic
+      q = query(collection(db, "orders"), where("VENDEDOR", "==", user.vendorCode), limit(500));
     }
-  }, [user]);
 
-  const handleLogin = (e: React.FormEvent) => {
+    const unsubscribe = onSnapshot(q, (snapshot) => {
+      let data = snapshot.docs.map(doc => doc.data() as OrderData);
+      
+      if (queryStr) {
+        const s = queryStr.toLowerCase();
+        data = data.filter(item => {
+          if (field && item[field]) {
+            return String(item[field]).toLowerCase().includes(s);
+          }
+          return Object.values(item).some(val => String(val).toLowerCase().includes(s));
+        });
+      }
+      
+      setResults(data);
+      setLoading(false);
+    }, (error) => {
+      console.error("Search failed", error);
+      setLoading(false);
+    });
+
+    return unsubscribe;
+  }, [fbUser, user]);
+
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoginError("");
 
-    if (password === "@adminMarsil2026") {
-      setUser({ role: "admin" });
-    } else if (password.toLowerCase().startsWith("marsil-")) {
-      const parts = password.split("-");
-      if (parts.length >= 2 && parts[1].trim()) {
-        setUser({ role: "vendedor", vendorCode: parts[1].trim() });
-      } else {
-        setLoginError("Senha de vendedor inválida. Use marsil-CÓDIGO.");
-      }
-    } else {
-      setLoginError("Senha incorreta.");
+    try {
+      await loginWithGoogle();
+    } catch (error) {
+      setLoginError("Falha ao entrar com Google.");
     }
   };
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    await signOut(auth);
     setUser(null);
-    setPassword("");
     setResults([]);
     setActiveTab("search");
   };
@@ -123,40 +161,74 @@ export default function App() {
   };
 
   useEffect(() => {
-    if (user) {
+    if (fbUser) {
       fetchStats();
-      handleSearch("", "");
+      const unsubscribe = handleSearch(searchQuery, searchField);
+      return () => unsubscribe && unsubscribe();
     }
-  }, [user, fetchStats, handleSearch]);
+  }, [fbUser, fetchStats, searchQuery, searchField, handleSearch]);
 
   const handleSyncSheets = async () => {
     if (!sheetsUrl) return;
     setUploading(true);
     setSyncStatus(null);
     try {
-      const response = await fetch("/api/sync-sheets", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: sheetsUrl }),
-      });
-      const data = await response.json();
-      if (response.ok) {
-        setSyncStatus({ success: true, message: `Sincronizado com sucesso! (${data.count} registros)` });
-        fetchStats();
-      } else {
-        const errorMsg = data.error || "Erro ao sincronizar.";
-        setSyncStatus({ 
-          success: false, 
-          message: errorMsg.includes("401") || errorMsg.includes("403") 
-            ? "Planilha privada! Mude para 'Qualquer pessoa com o link'." 
-            : errorMsg 
-        });
+      let exportUrl = sheetsUrl;
+      if (sheetsUrl.includes("docs.google.com/spreadsheets")) {
+        if (sheetsUrl.includes("/pubhtml") || sheetsUrl.includes("/pub?")) {
+          exportUrl = sheetsUrl.replace("/pubhtml", "/pub").split("?")[0] + "?output=csv";
+          if (sheetsUrl.includes("gid=")) {
+            const gidMatch = sheetsUrl.match(/gid=([0-9]+)/);
+            if (gidMatch) exportUrl += `&gid=${gidMatch[1]}`;
+          }
+        } else {
+          const match = sheetsUrl.match(/\/d\/(.+?)(\/|$)/);
+          if (match && match[1]) {
+            exportUrl = `https://docs.google.com/spreadsheets/d/${match[1]}/export?format=csv`;
+            const gidMatch = sheetsUrl.match(/gid=([0-9]+)/);
+            if (gidMatch) exportUrl += `&gid=${gidMatch[1]}`;
+          }
+        }
       }
-    } catch (error) {
-      setSyncStatus({ success: false, message: "Erro de conexão." });
+
+      const response = await fetch(exportUrl);
+      if (!response.ok) throw new Error("Falha ao buscar planilha. Verifique se o link é público.");
+
+      const text = await response.text();
+      const workbook = XLSX.read(text, { type: "string" });
+      const jsonData = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { defval: "" });
+
+      await saveOrdersToFirestore(jsonData);
+      setSyncStatus({ success: true, message: `Sincronizado com sucesso! (${jsonData.length} registros)` });
+      fetchStats();
+    } catch (error: any) {
+      console.error("Sync failed", error);
+      setSyncStatus({ success: false, message: error.message || "Erro ao sincronizar." });
     } finally {
       setUploading(false);
     }
+  };
+
+  const saveOrdersToFirestore = async (orders: any[]) => {
+    const { writeBatch, doc, collection } = await import("firebase/firestore");
+    const batchSize = 500;
+    for (let i = 0; i < orders.length; i += batchSize) {
+      const batch = writeBatch(db);
+      const chunk = orders.slice(i, i + batchSize);
+      chunk.forEach((order, index) => {
+        const orderId = order.PEDIDO ? String(order.PEDIDO) : `order_${i + index}_${Date.now()}`;
+        const docRef = doc(collection(db, "orders"), orderId);
+        batch.set(docRef, order);
+      });
+      await batch.commit();
+    }
+    
+    const statsRef = doc(db, "stats", "global");
+    const { setDoc } = await import("firebase/firestore");
+    await setDoc(statsRef, {
+      totalRecords: orders.length,
+      lastUpdated: new Date().toISOString()
+    });
   };
 
   const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -166,27 +238,31 @@ export default function App() {
     setUploading(true);
     setMessage(null);
 
-    const formData = new FormData();
-    formData.append("file", file);
-
     try {
-      const res = await fetch("/api/upload", {
-        method: "POST",
-        body: formData,
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setMessage({ type: "success", text: `Sucesso! ${data.count} registros carregados.` });
-        fetchStats();
-        handleSearch("", "");
-      } else {
-        setMessage({ type: "error", text: data.error || "Falha no upload." });
-      }
+      const reader = new FileReader();
+      reader.onload = async (evt) => {
+        try {
+          const bstr = evt.target?.result;
+          const workbook = XLSX.read(bstr, { type: "binary" });
+          const sheetName = workbook.SheetNames[0];
+          const worksheet = workbook.Sheets[sheetName];
+          const jsonData = XLSX.utils.sheet_to_json(worksheet);
+
+          await saveOrdersToFirestore(jsonData);
+          setMessage({ type: "success", text: `Sucesso! ${jsonData.length} registros carregados.` });
+          fetchStats();
+        } catch (err) {
+          console.error("File processing failed", err);
+          setMessage({ type: "error", text: "Falha ao processar arquivo Excel." });
+        } finally {
+          setUploading(false);
+        }
+      };
+      reader.readAsBinaryString(file);
     } catch (e) {
-      setMessage({ type: "error", text: "Erro de conexão ao enviar arquivo." });
-    } finally {
+      setMessage({ type: "error", text: "Erro ao ler arquivo." });
       setUploading(false);
-      // Reset input
+    } finally {
       e.target.value = "";
     }
   };
@@ -213,22 +289,10 @@ export default function App() {
               <Lock className="text-white w-8 h-8" />
             </div>
             <h1 className="text-3xl font-bold text-[#0F172A]">Acesso Restrito</h1>
-            <p className="text-[#64748B]">Entre com sua senha para acessar o sistema Marsil.</p>
+            <p className="text-[#64748B]">Entre com sua conta Google para acessar o sistema Marsil.</p>
           </div>
 
-          <form onSubmit={handleLogin} className="space-y-6">
-            <div className="space-y-2">
-              <label className="text-sm font-bold text-[#1E293B] ml-1">Senha</label>
-              <input
-                type="password"
-                placeholder="Sua senha de acesso"
-                className="w-full px-6 py-4 bg-[#F8FAFC] border border-[#E2E8F0] rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none transition-all text-lg"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                autoFocus
-              />
-            </div>
-
+          <div className="space-y-6">
             {loginError && (
               <motion.div 
                 initial={{ opacity: 0, y: -10 }}
@@ -241,12 +305,13 @@ export default function App() {
             )}
 
             <button
-              type="submit"
-              className="w-full bg-blue-600 hover:bg-blue-700 text-white py-4 rounded-2xl font-bold text-lg shadow-lg shadow-blue-200 transition-all active:scale-[0.98]"
+              onClick={handleLogin}
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white py-4 rounded-2xl font-bold text-lg shadow-lg shadow-blue-200 transition-all active:scale-[0.98] flex items-center justify-center gap-3"
             >
-              Entrar no Sistema
+              <User className="w-6 h-6" />
+              Entrar com Google
             </button>
-          </form>
+          </div>
 
           <div className="pt-4 text-center">
             <p className="text-xs text-[#94A3B8]">

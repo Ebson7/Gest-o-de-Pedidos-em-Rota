@@ -1,0 +1,46 @@
+{
+  "entities": {
+    "Order": {
+      "title": "Order",
+      "description": "A logistics order record",
+      "type": "object",
+      "properties": {
+        "ROTA": { "type": "string" },
+        "OBS_SHEET": { "type": "string" },
+        "N": { "type": "number" },
+        "PEDIDO": { "type": "string" },
+        "LOTE": { "type": "string" },
+        "VENDEDOR": { "type": "string" },
+        "PRAÇA": { "type": "string" },
+        "CLIENTE": { "type": "string" },
+        "ENDERECO": { "type": "string" },
+        "BAIRRO": { "type": "string" },
+        "CIDADE": { "type": "string" },
+        "PESO": { "type": "number" },
+        "VALOR": { "type": "number" },
+        "CANAL": { "type": "string" },
+        "DATA": { "type": "string" }
+      },
+      "required": ["PEDIDO", "CLIENTE"]
+    },
+    "Stats": {
+      "title": "Stats",
+      "description": "Global application statistics",
+      "type": "object",
+      "properties": {
+        "totalRecords": { "type": "number" },
+        "lastUpdated": { "type": "string", "format": "date-time" }
+      }
+    }
+  },
+  "firestore": {
+    "/orders/{orderId}": {
+      "schema": "Order",
+      "description": "Collection of all orders"
+    },
+    "/stats/global": {
+      "schema": "Stats",
+      "description": "Global statistics document"
+    }
+  }
+}

@@ -10,7 +10,8 @@ service cloud.firestore {
 
     function isAdmin() {
       return isAuthenticated() &&
-        (get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin' ||
+        ((exists(/databases/$(database)/documents/users/$(request.auth.uid)) && 
+          get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'admin') ||
           (request.auth.token.email == "ebsonsilva7@gmail.com" && request.auth.token.email_verified == true)); // Default admin
     }
 
@@ -19,8 +20,8 @@ service cloud.firestore {
     // ===============================================================
     function isValidOrder(data) {
       return data.keys().hasAll(['PEDIDO', 'CLIENTE']) &&
-             data.PEDIDO is string && data.PEDIDO.size() < 100 &&
-             data.CLIENTE is string && data.CLIENTE.size() < 200;
+             (data.PEDIDO is string || data.PEDIDO is number) &&
+             (data.CLIENTE is string || data.CLIENTE is number);
     }
 
     function isValidStats(data) {
@@ -29,20 +30,32 @@ service cloud.firestore {
              data.lastUpdated is string;
     }
 
+    function isValidUser(data) {
+      return data.keys().hasAll(['role', 'updatedAt']) &&
+             data.role in ['admin', 'vendedor'] &&
+             data.updatedAt is string;
+    }
+
     // ===============================================================
     // Rules
     // ===============================================================
 
+    // Users collection
+    match /users/{userId} {
+      allow read: if isAuthenticated();
+      allow create, update: if isAuthenticated() && request.auth.uid == userId && isValidUser(request.resource.data);
+    }
+
     // Orders collection
     match /orders/{orderId} {
-      allow read: if isAuthenticated();
-      allow write: if isAuthenticated() && isValidOrder(request.resource.data);
+      allow get, list: if isAuthenticated();
+      allow write: if isAdmin() && isValidOrder(request.resource.data);
     }
 
     // Stats document
     match /stats/{docId} {
       allow read: if isAuthenticated();
-      allow write: if isAuthenticated() && isValidStats(request.resource.data);
+      allow write: if isAdmin() && isValidStats(request.resource.data);
     }
 
     // Default deny for everything else

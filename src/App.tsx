@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, Component } from "react";
 import { Search, Upload, FileSpreadsheet, Package, MapPin, User, DollarSign, Calendar, AlertCircle, CheckCircle2, Loader2, ChevronRight, ChevronLeft, Filter, Download, Lock, LogOut, RefreshCw } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import * as XLSX from "xlsx";
@@ -54,7 +54,52 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
     path
   }
   console.error('Firestore Error: ', JSON.stringify(errInfo));
+  // Only throw if it's NOT a permission error that we can handle gracefully
+  if (errInfo.error.includes("Missing or insufficient permissions")) {
+    return; // Don't crash the app for permission errors, just log them
+  }
   throw new Error(JSON.stringify(errInfo));
+}
+
+interface ErrorBoundaryProps {
+  children: React.ReactNode;
+}
+
+interface ErrorBoundaryState {
+  hasError: boolean;
+  errorInfo: string;
+}
+
+class ErrorBoundary extends (Component as any) {
+  constructor(props: any) {
+    super(props);
+    this.state = { hasError: false, errorInfo: "" };
+  }
+
+  static getDerivedStateFromError(error: any) {
+    return { hasError: true, errorInfo: error.message };
+  }
+
+  render() {
+    if (this.state.hasError) {
+      return (
+        <div className="min-h-screen bg-red-50 flex items-center justify-center p-4">
+          <div className="bg-white p-8 rounded-3xl shadow-xl max-w-lg w-full text-center space-y-4 border border-red-100">
+            <AlertCircle className="w-16 h-16 text-red-500 mx-auto" />
+            <h2 className="text-2xl font-bold text-gray-900">Ops! Algo deu errado</h2>
+            <p className="text-gray-600">Ocorreu um erro inesperado no sistema. Por favor, tente recarregar a página.</p>
+            <button 
+              onClick={() => window.location.reload()}
+              className="bg-red-600 text-white px-6 py-3 rounded-xl font-bold hover:bg-red-700 transition-colors"
+            >
+              Recarregar Página
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return this.props.children;
+  }
 }
 
 interface OrderData {
@@ -86,7 +131,15 @@ interface AuthUser {
   vendorCode?: string;
 }
 
-export default function App() {
+export default function AppWrapper() {
+  return (
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
+  );
+}
+
+function App() {
   const [fbUser, setFbUser] = useState<FirebaseUser | null>(null);
   const [isAuthReady, setIsAuthReady] = useState(false);
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -105,11 +158,24 @@ export default function App() {
 
   // Auth listener
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, (u) => {
+    const unsubscribe = onAuthStateChanged(auth, async (u) => {
       setFbUser(u);
       setIsAuthReady(true);
       
       if (u) {
+        // Restore user role from Firestore if not in state
+        if (!user) {
+          try {
+            const userDoc = await getDoc(doc(db, "users", u.uid));
+            if (userDoc.exists()) {
+              const data = userDoc.data();
+              setUser({ role: data.role, vendorCode: data.vendorCode });
+            }
+          } catch (e) {
+            console.error("Error restoring user role", e);
+          }
+        }
+
         // Test connection
         const testConnection = async () => {
           try {
@@ -152,7 +218,7 @@ export default function App() {
   }, [fbUser]);
 
   const handleSearch = useCallback((queryStr: string, field: string) => {
-    if (!fbUser) return;
+    if (!fbUser || !auth.currentUser) return;
     setLoading(true);
     
     let q = query(collection(db, "orders"), limit(500));
@@ -192,10 +258,21 @@ export default function App() {
 
     if (password === "@adminMarsil2026") {
       try {
-        await loginAnonymously();
+        const cred = await loginAnonymously();
+        // Create/Update admin profile in Firestore so rules can verify
+        const { doc, setDoc } = await import("firebase/firestore");
+        await setDoc(doc(db, "users", cred.user.uid), {
+          role: "admin",
+          updatedAt: new Date().toISOString()
+        });
         setUser({ role: "admin" });
-      } catch (error) {
-        setLoginError("Erro ao conectar ao servidor.");
+      } catch (error: any) {
+        console.error("Login failed", error);
+        if (error.code === "auth/admin-restricted-operation") {
+          setLoginError("Erro: A Autenticação Anônima não está ativa no projeto correto (gen-lang-client-0554604238).");
+        } else {
+          setLoginError("Erro ao conectar ao servidor. Verifique se a Autenticação Anônima está ativa no Firebase.");
+        }
       }
     } else if (password.toLowerCase().startsWith("marsil-")) {
       const parts = password.split("-");

@@ -38,26 +38,30 @@ function handleFirestoreError(error: unknown, operationType: OperationType, path
   const errInfo: FirestoreErrorInfo = {
     error: error instanceof Error ? error.message : String(error),
     authInfo: {
-      userId: auth.currentUser?.uid,
-      email: auth.currentUser?.email,
-      emailVerified: auth.currentUser?.emailVerified,
-      isAnonymous: auth.currentUser?.isAnonymous,
-      tenantId: auth.currentUser?.tenantId,
+      userId: auth.currentUser?.uid || "não autenticado",
+      email: auth.currentUser?.email || "null",
+      emailVerified: auth.currentUser?.emailVerified || false,
+      isAnonymous: auth.currentUser?.isAnonymous || false,
+      tenantId: auth.currentUser?.tenantId || "null",
       providerInfo: auth.currentUser?.providerData.map(provider => ({
         providerId: provider.providerId,
-        displayName: provider.displayName,
-        email: provider.email,
-        photoUrl: provider.photoURL
+        displayName: provider.displayName || "",
+        email: provider.email || "",
+        photoUrl: provider.photoURL || ""
       })) || []
     },
     operationType,
     path
   }
+  
   console.error('Firestore Error: ', JSON.stringify(errInfo));
-  // Only throw if it's NOT a permission error that we can handle gracefully
+  
+  // Se for erro de permissão, retornar uma mensagem amigável em vez do JSON
   if (errInfo.error.toLowerCase().includes("permission") || errInfo.error.toLowerCase().includes("insufficient")) {
-    return; // Don't crash the app for permission errors, just log them
+    const friendlyMessage = "Erro de Permissão: Você não tem autorização para realizar esta operação. Certifique-se de estar logado como Administrador e que seu perfil foi criado corretamente.";
+    throw new Error(friendlyMessage);
   }
+  
   throw new Error(JSON.stringify(errInfo));
 }
 
@@ -377,7 +381,7 @@ function App() {
           newItem[upperKey] = value;
         });
         return newItem;
-      });
+      }).filter(item => item.PEDIDO && item.CLIENTE); // Filtrar linhas inválidas ou vazias
 
       await saveOrdersToFirestore(jsonData);
       setSyncStatus({ success: true, message: `Sincronizado com sucesso! (${jsonData.length} registros)` });
@@ -446,7 +450,7 @@ function App() {
               newItem[upperKey] = value;
             });
             return newItem;
-          });
+          }).filter(item => item.PEDIDO && item.CLIENTE); // Filtrar linhas inválidas ou vazias
 
           await saveOrdersToFirestore(jsonData);
           setMessage({ type: "success", text: `Sucesso! ${jsonData.length} registros carregados.` });

@@ -226,17 +226,16 @@ function App() {
     if (!fbUser || !auth.currentUser) return;
     setLoading(true);
     
-    let q = query(collection(db, "orders"), limit(500));
+    // Obter data de hoje no formato YYYY-MM-DD (local)
+    const today = new Date().toLocaleDateString('sv-SE');
     
-    if (user?.role === "vendedor" && user.vendorCode) {
-      // If the vendor code was manually entered, we use it, otherwise we might use UID
-      // For now, let's stick to the vendor code logic
-      q = query(collection(db, "orders"), where("VENDEDOR", "==", user.vendorCode), limit(500));
-    }
-
+    // Filtramos apenas pelo dia de hoje para garantir que só vemos o que foi sincronizado hoje
+    // Aumentamos o limite para garantir que pegamos todos os registros do dia
+    let q = query(collection(db, "orders"), where("syncDate", "==", today), limit(2000));
+    
     const unsubscribe = onSnapshot(q, (snapshot) => {
       if (!auth.currentUser) return;
-      console.log(`Snapshot recebido: ${snapshot.size} documentos encontrados.`);
+      console.log(`Snapshot recebido: ${snapshot.size} documentos encontrados para o dia ${today}.`);
       
       if (snapshot.empty) {
         setIsDatabaseEmpty(true);
@@ -248,6 +247,11 @@ function App() {
       setIsDatabaseEmpty(false);
       let data = snapshot.docs.map(doc => doc.data() as OrderData);
       
+      // Filtro de Vendedor (feito no cliente para evitar necessidade de índices compostos no Firestore)
+      if (user?.role === "vendedor" && user.vendorCode) {
+        data = data.filter(item => String(item.VENDEDOR) === String(user.vendorCode));
+      }
+
       if (queryStr) {
         const s = queryStr.toLowerCase();
         data = data.filter(item => {
@@ -398,6 +402,8 @@ function App() {
     const { writeBatch, doc, collection } = await import("firebase/firestore");
     const batchSize = 500;
     const path = "orders";
+    const today = new Date().toLocaleDateString('sv-SE');
+    
     try {
       for (let i = 0; i < orders.length; i += batchSize) {
         const batch = writeBatch(db);
@@ -405,7 +411,8 @@ function App() {
         chunk.forEach((order, index) => {
           const orderId = order.PEDIDO ? String(order.PEDIDO) : `order_${i + index}_${Date.now()}`;
           const docRef = doc(collection(db, "orders"), orderId);
-          batch.set(docRef, order);
+          // Adicionar a data de sincronização para filtragem diária
+          batch.set(docRef, { ...order, syncDate: today });
         });
         await batch.commit();
       }

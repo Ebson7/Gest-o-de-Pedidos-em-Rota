@@ -19,9 +19,10 @@ service cloud.firestore {
     // Domain Validators
     // ===============================================================
     function isValidOrder(data) {
-      return data.keys().hasAll(['PEDIDO', 'CLIENTE']) &&
+      return data.keys().hasAll(['PEDIDO', 'CLIENTE', 'syncDate']) &&
              (data.PEDIDO is string || data.PEDIDO is number) &&
-             (data.CLIENTE is string || data.CLIENTE is number);
+             (data.CLIENTE is string || data.CLIENTE is number) &&
+             data.syncDate is string;
     }
 
     function isValidStats(data) {

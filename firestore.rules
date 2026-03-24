@@ -50,7 +50,8 @@ service cloud.firestore {
     // Orders collection
     match /orders/{orderId} {
       allow get, list: if isAuthenticated();
-      allow write: if isAdmin() && isValidOrder(request.resource.data);
+      allow create, update: if isAdmin() && isValidOrder(request.resource.data);
+      allow delete: if isAdmin();
     }
 
     // Stats document

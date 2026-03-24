@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, Component } from "react";
-import { Search, Upload, FileSpreadsheet, Package, MapPin, User, DollarSign, Calendar, AlertCircle, CheckCircle2, Loader2, ChevronRight, ChevronLeft, Filter, Download, Lock, LogOut, RefreshCw } from "lucide-react";
+import { Search, Upload, FileSpreadsheet, Package, MapPin, User, DollarSign, Calendar, AlertCircle, CheckCircle2, Loader2, ChevronRight, ChevronLeft, Filter, Download, Lock, LogOut, RefreshCw, Trash2 } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import * as XLSX from "xlsx";
 import { auth, db, loginAnonymously } from "./firebase";
@@ -201,24 +201,25 @@ function App() {
     return () => unsubscribe();
   }, []);
 
+  // Stats listener
+  useEffect(() => {
+    if (!fbUser) return;
+    const statsRef = doc(db, "stats", "global");
+    const unsubscribe = onSnapshot(statsRef, (docSnap) => {
+      if (docSnap.exists()) {
+        setStats(docSnap.data() as Stats);
+      }
+    }, (error) => {
+      console.error("Error listening to stats", error);
+    });
+    return () => unsubscribe();
+  }, [fbUser]);
+
   const filteredStats = React.useMemo(() => {
     return {
       count: results.length
     };
   }, [results]);
-
-  const fetchStats = useCallback(async () => {
-    if (!fbUser) return;
-    const path = "stats/global";
-    try {
-      const statsDoc = await getDoc(doc(db, "stats", "global"));
-      if (statsDoc.exists()) {
-        setStats(statsDoc.data() as Stats);
-      }
-    } catch (e) {
-      handleFirestoreError(e, OperationType.GET, path);
-    }
-  }, [fbUser]);
 
   const handleSearch = useCallback((queryStr: string, field: string) => {
     if (!fbUser || !auth.currentUser) return;
@@ -229,7 +230,7 @@ function App() {
     
     // Filtramos apenas pelo dia de hoje para garantir que só vemos o que foi sincronizado hoje
     // Aumentamos o limite para garantir que pegamos todos os registros do dia
-    let q = query(collection(db, "orders"), where("syncDate", "==", today), limit(2000));
+    let q = query(collection(db, "orders"), limit(2000));
     
     const unsubscribe = onSnapshot(q, (snapshot) => {
       if (!auth.currentUser) return;
@@ -333,44 +334,65 @@ function App() {
 
   useEffect(() => {
     if (fbUser) {
-      fetchStats();
       const unsubscribe = handleSearch(searchQuery, searchField);
       return () => unsubscribe && unsubscribe();
     }
-  }, [fbUser, fetchStats, searchQuery, searchField, handleSearch]);
+  }, [fbUser, searchQuery, searchField, handleSearch]);
 
   const handleSyncSheets = async () => {
-    if (!sheetsUrl) return;
+    const trimmedUrl = sheetsUrl.trim();
+    if (!trimmedUrl) return;
     setUploading(true);
     setSyncStatus(null);
     try {
-      let exportUrl = sheetsUrl;
-      if (sheetsUrl.includes("docs.google.com/spreadsheets")) {
-        if (sheetsUrl.includes("/pubhtml") || sheetsUrl.includes("/pub?")) {
-          exportUrl = sheetsUrl.replace("/pubhtml", "/pub").split("?")[0] + "?output=csv";
-          if (sheetsUrl.includes("gid=")) {
-            const gidMatch = sheetsUrl.match(/gid=([0-9]+)/);
+      let exportUrl = trimmedUrl;
+      if (trimmedUrl.includes("docs.google.com/spreadsheets")) {
+        if (trimmedUrl.includes("/pubhtml") || trimmedUrl.includes("/pub?")) {
+          exportUrl = trimmedUrl.replace("/pubhtml", "/pub").split("?")[0] + "?output=csv";
+          if (trimmedUrl.includes("gid=")) {
+            const gidMatch = trimmedUrl.match(/gid=([0-9]+)/);
             if (gidMatch) exportUrl += `&gid=${gidMatch[1]}`;
           }
         } else {
-          const match = sheetsUrl.match(/\/d\/(.+?)(\/|$)/);
+          const match = trimmedUrl.match(/\/d\/(.+?)(\/|$)/);
           if (match && match[1]) {
             exportUrl = `https://docs.google.com/spreadsheets/d/${match[1]}/export?format=csv`;
-            const gidMatch = sheetsUrl.match(/gid=([0-9]+)/);
+            const gidMatch = trimmedUrl.match(/gid=([0-9]+)/);
             if (gidMatch) exportUrl += `&gid=${gidMatch[1]}`;
           }
         }
       }
 
+      setSyncStatus({ success: true, message: "Buscando dados da planilha..." });
       const response = await fetch(exportUrl);
-      if (!response.ok) throw new Error("Falha ao buscar planilha. Verifique se o link é público.");
+      if (!response.ok) throw new Error("Falha ao buscar planilha. Verifique se o link é público e permite acesso.");
 
-      const text = await response.text();
-      const workbook = XLSX.read(text, { type: "string" });
-      const rawData = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { defval: "" }) as any[];
+      const contentType = response.headers.get("content-type");
+      let jsonData: any[] = [];
 
+      if (contentType && (contentType.includes("text/csv") || contentType.includes("text/plain"))) {
+        const text = await response.text();
+        if (text.includes("<!DOCTYPE html>") || text.includes("<html")) {
+          throw new Error("O link fornecido retornou uma página HTML. Certifique-se de que a planilha está 'Publicada na Web' como CSV.");
+        }
+        const workbook = XLSX.read(text, { type: "string" });
+        const rawData = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { defval: "" }) as any[];
+        jsonData = rawData;
+      } else {
+        const arrayBuffer = await response.arrayBuffer();
+        const workbook = XLSX.read(arrayBuffer, { type: "array" });
+        if (!workbook.SheetNames.length) throw new Error("Não foi possível encontrar dados na planilha.");
+        const rawData = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { defval: "" }) as any[];
+        jsonData = rawData;
+      }
+      
+      if (jsonData.length === 0) {
+        throw new Error("A planilha parece estar vazia.");
+      }
+
+      setSyncStatus({ success: true, message: "Processando dados..." });
       // Normalizar chaves para maiúsculas e mapear novos cabeçalhos
-      const jsonData = rawData.map(item => {
+      const processedData = jsonData.map(item => {
         const newItem: any = {};
         Object.keys(item).forEach(key => {
           const rawKey = key.trim();
@@ -395,34 +417,55 @@ function App() {
         return newItem;
       }).filter(item => item.PEDIDO && item.CLIENTE); // Filtrar linhas inválidas ou vazias
 
-      await saveOrdersToFirestore(jsonData);
-      setSyncStatus({ success: true, message: `Sincronizado com sucesso! (${jsonData.length} registros)` });
-      fetchStats();
+      if (processedData.length === 0) {
+        throw new Error("Nenhum pedido válido encontrado após o processamento. Verifique os cabeçalhos da planilha.");
+      }
+
+      await saveOrdersToFirestore(processedData);
+      setSyncStatus({ success: true, message: `Sincronizado com sucesso! (${processedData.length} registros)` });
     } catch (error: any) {
       console.error("Sync failed", error);
-      setSyncStatus({ success: false, message: error.message || "Erro ao sincronizar." });
+      let errorMsg = error.message || "Erro ao sincronizar.";
+      if (errorMsg.includes("Failed to fetch")) errorMsg = "Erro de conexão ao buscar a planilha. Verifique se o link é válido e público.";
+      setSyncStatus({ success: false, message: errorMsg });
     } finally {
       setUploading(false);
     }
   };
 
   const saveOrdersToFirestore = async (orders: any[]) => {
-    const { writeBatch, doc, collection } = await import("firebase/firestore");
+    const { writeBatch, doc, collection, getDocs } = await import("firebase/firestore");
     const batchSize = 500;
     const path = "orders";
     const today = new Date().toLocaleDateString('sv-SE');
     
     try {
-      for (let i = 0; i < orders.length; i += batchSize) {
-        const batch = writeBatch(db);
-        const chunk = orders.slice(i, i + batchSize);
-        chunk.forEach((order, index) => {
-          const orderId = order.PEDIDO ? String(order.PEDIDO) : `order_${i + index}_${Date.now()}`;
-          const docRef = doc(collection(db, "orders"), orderId);
-          // Adicionar a data de sincronização para filtragem diária
-          batch.set(docRef, { ...order, syncDate: today });
-        });
-        await batch.commit();
+      setSyncStatus({ success: true, message: "Limpando dados antigos..." });
+      // Limpar cache (deletar todos os registros existentes antes da nova sincronização)
+      const querySnapshot = await getDocs(collection(db, "orders"));
+      const existingDocs = querySnapshot.docs;
+      
+      for (let i = 0; i < existingDocs.length; i += batchSize) {
+        const deleteBatch = writeBatch(db);
+        const chunk = existingDocs.slice(i, i + batchSize);
+        chunk.forEach((d) => deleteBatch.delete(d.ref));
+        await deleteBatch.commit();
+      }
+
+      if (orders.length > 0) {
+        setSyncStatus({ success: true, message: `Salvando ${orders.length} novos registros...` });
+        // Salvar novos registros
+        for (let i = 0; i < orders.length; i += batchSize) {
+          const batch = writeBatch(db);
+          const chunk = orders.slice(i, i + batchSize);
+          chunk.forEach((order, index) => {
+            const orderId = order.PEDIDO ? String(order.PEDIDO) : `order_${i + index}_${Date.now()}`;
+            const docRef = doc(collection(db, "orders"), orderId);
+            // Adicionar a data de sincronização para filtragem diária
+            batch.set(docRef, { ...order, syncDate: today });
+          });
+          await batch.commit();
+        }
       }
       
       const statsRef = doc(db, "stats", "global");
@@ -478,12 +521,15 @@ function App() {
             return newItem;
           }).filter(item => item.PEDIDO && item.CLIENTE); // Filtrar linhas inválidas ou vazias
 
+          if (jsonData.length === 0) {
+            throw new Error("Nenhum pedido válido encontrado no arquivo. Verifique se as colunas estão corretas.");
+          }
+
           await saveOrdersToFirestore(jsonData);
           setMessage({ type: "success", text: `Sucesso! ${jsonData.length} registros carregados.` });
-          fetchStats();
-        } catch (err) {
+        } catch (err: any) {
           console.error("File processing failed", err);
-          setMessage({ type: "error", text: "Falha ao processar arquivo Excel." });
+          setMessage({ type: "error", text: err.message || "Falha ao processar arquivo Excel." });
         } finally {
           setUploading(false);
         }
@@ -494,6 +540,19 @@ function App() {
       setUploading(false);
     } finally {
       e.target.value = "";
+    }
+  };
+
+  const handleClearData = async () => {
+    if (!window.confirm("Tem certeza que deseja apagar TODOS os registros? Esta ação não pode ser desfeita.")) return;
+    setUploading(true);
+    try {
+      await saveOrdersToFirestore([]);
+      setMessage({ type: "success", text: "Todos os dados foram apagados com sucesso." });
+    } catch (error: any) {
+      setMessage({ type: "error", text: "Erro ao apagar dados." });
+    } finally {
+      setUploading(false);
     }
   };
 
@@ -917,6 +976,17 @@ function App() {
                     ))}
                     <span className="px-2 py-1 bg-white border border-[#E2E8F0] rounded-lg text-[10px] font-mono text-[#64748B]">...</span>
                   </div>
+                </div>
+
+                <div className="pt-4 border-t border-[#E2E8F0]">
+                  <button
+                    onClick={handleClearData}
+                    disabled={uploading}
+                    className="w-full py-3 px-4 rounded-xl border border-red-200 text-red-600 text-xs font-bold hover:bg-red-50 transition-all flex items-center justify-center gap-2 disabled:opacity-50"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                    Limpar Todos os Dados do Sistema
+                  </button>
                 </div>
               </div>
             </motion.div>

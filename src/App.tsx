@@ -122,6 +122,7 @@ interface OrderData {
   VALOR?: number;
   CANAL?: string;
   DATA?: string | number;
+  SITUACAO?: string;
   [key: string]: any;
 }
 
@@ -372,17 +373,28 @@ function App() {
       const workbook = XLSX.read(text, { type: "string" });
       const rawData = XLSX.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]], { defval: "" }) as any[];
 
-      // Normalizar chaves para maiúsculas e valores importantes para string
+      // Normalizar chaves para maiúsculas e mapear novos cabeçalhos
       const jsonData = rawData.map(item => {
         const newItem: any = {};
         Object.keys(item).forEach(key => {
-          const upperKey = key.toUpperCase().trim();
+          const rawKey = key.trim();
+          const upperKey = rawKey.toUpperCase();
           let value = item[key];
+
+          // Mapeamento de cabeçalhos conforme imagem
+          let mappedKey = upperKey;
+          if (upperKey === "VENDEDOR") mappedKey = "VENDEDOR";
+          if (upperKey === "PEDIDO") mappedKey = "PEDIDO";
+          if (upperKey === "DESTINATÁRIO" || upperKey === "DESTINATARIO") mappedKey = "CLIENTE";
+          if (upperKey === "DT.PEDIDO" || upperKey === "DATA") mappedKey = "DATA";
+          if (upperKey === "VALOR TOTAL" || upperKey === "VALOR") mappedKey = "VALOR";
+          if (upperKey === "SIT.CARGA" || upperKey === "SITUACAO" || upperKey === "SITUAÇÃO") mappedKey = "SITUACAO";
+
           // Normalizar campos de busca para string
-          if (["PEDIDO", "VENDEDOR", "LOTE", "CLIENTE", "CIDADE"].includes(upperKey)) {
+          if (["PEDIDO", "VENDEDOR", "LOTE", "CLIENTE", "CIDADE", "DATA"].includes(mappedKey)) {
             value = value !== undefined && value !== null ? String(value).trim() : "";
           }
-          newItem[upperKey] = value;
+          newItem[mappedKey] = value;
         });
         return newItem;
       }).filter(item => item.PEDIDO && item.CLIENTE); // Filtrar linhas inválidas ou vazias
@@ -445,16 +457,27 @@ function App() {
           const worksheet = workbook.Sheets[sheetName];
           const rawData = XLSX.utils.sheet_to_json(worksheet) as any[];
 
-          // Normalizar chaves para maiúsculas e valores importantes para string
+          // Normalizar chaves para maiúsculas e mapear novos cabeçalhos
           const jsonData = rawData.map(item => {
             const newItem: any = {};
             Object.keys(item).forEach(key => {
-              const upperKey = key.toUpperCase().trim();
+              const rawKey = key.trim();
+              const upperKey = rawKey.toUpperCase();
               let value = item[key];
-              if (["PEDIDO", "VENDEDOR", "LOTE", "CLIENTE", "CIDADE"].includes(upperKey)) {
+
+              // Mapeamento de cabeçalhos conforme imagem
+              let mappedKey = upperKey;
+              if (upperKey === "VENDEDOR") mappedKey = "VENDEDOR";
+              if (upperKey === "PEDIDO") mappedKey = "PEDIDO";
+              if (upperKey === "DESTINATÁRIO" || upperKey === "DESTINATARIO") mappedKey = "CLIENTE";
+              if (upperKey === "DT.PEDIDO" || upperKey === "DATA") mappedKey = "DATA";
+              if (upperKey === "VALOR TOTAL" || upperKey === "VALOR") mappedKey = "VALOR";
+              if (upperKey === "SIT.CARGA" || upperKey === "SITUACAO" || upperKey === "SITUAÇÃO") mappedKey = "SITUACAO";
+
+              if (["PEDIDO", "VENDEDOR", "LOTE", "CLIENTE", "CIDADE", "DATA"].includes(mappedKey)) {
                 value = value !== undefined && value !== null ? String(value).trim() : "";
               }
-              newItem[upperKey] = value;
+              newItem[mappedKey] = value;
             });
             return newItem;
           }).filter(item => item.PEDIDO && item.CLIENTE); // Filtrar linhas inválidas ou vazias
@@ -479,12 +502,11 @@ function App() {
   };
 
   const fields = [
+    { value: "CLIENTE", label: "Destinatário" },
+    { value: "DATA", label: "Data do Pedido" },
     { value: "PEDIDO", label: "Pedido" },
-    { value: "CLIENTE", label: "Cliente" },
     { value: "VENDEDOR", label: "Vendedor" },
-    { value: "CIDADE", label: "Cidade" },
-    { value: "ROTA", label: "Rota" },
-    { value: "LOTE", label: "Lote" },
+    { value: "SITUACAO", label: "Situação de Carga" },
   ];
 
   if (!user) {
@@ -650,7 +672,7 @@ function App() {
                     <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-[#94A3B8] w-5 h-5" />
                     <input
                       type="text"
-                      placeholder="Pesquisar por pedido, cliente, cidade..."
+                      placeholder="Pesquisar por cliente ou data do pedido..."
                       className="w-full pl-12 pr-4 py-3 bg-[#F8FAFC] border border-[#E2E8F0] rounded-2xl focus:ring-2 focus:ring-blue-500 focus:border-blue-500 outline-none transition-all"
                       value={searchQuery}
                       onChange={(e) => {
@@ -690,19 +712,17 @@ function App() {
                   <table className="w-full text-left border-collapse">
                     <thead>
                       <tr className="bg-[#F8FAFC] border-b border-[#E2E8F0]">
+                        <th className="px-6 py-4 text-xs font-semibold text-[#64748B] uppercase tracking-wider">Destinatário</th>
                         <th className="px-6 py-4 text-xs font-semibold text-[#64748B] uppercase tracking-wider">Data Pedido</th>
-                        <th className="px-6 py-4 text-xs font-semibold text-[#64748B] uppercase tracking-wider">Data Arquivo</th>
-                        <th className="px-6 py-4 text-xs font-semibold text-[#64748B] uppercase tracking-wider">Pedido / Lote</th>
-                        <th className="px-6 py-4 text-xs font-semibold text-[#64748B] uppercase tracking-wider">Cliente</th>
-                        <th className="px-6 py-4 text-xs font-semibold text-[#64748B] uppercase tracking-wider">Localização</th>
+                        <th className="px-6 py-4 text-xs font-semibold text-[#64748B] uppercase tracking-wider">Pedido</th>
                         <th className="px-6 py-4 text-xs font-semibold text-[#64748B] uppercase tracking-wider">Vendedor</th>
-                        <th className="px-6 py-4 text-xs font-semibold text-[#64748B] uppercase tracking-wider">Status/Rota</th>
+                        <th className="px-6 py-4 text-xs font-semibold text-[#64748B] uppercase tracking-wider">Situação Carga</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-[#E2E8F0]">
                       {loading ? (
                         <tr>
-                          <td colSpan={7} className="px-6 py-12 text-center">
+                          <td colSpan={5} className="px-6 py-12 text-center">
                             <Loader2 className="w-8 h-8 text-blue-600 animate-spin mx-auto mb-2" />
                             <p className="text-[#64748B] font-medium">Buscando dados no servidor...</p>
                           </td>
@@ -717,65 +737,39 @@ function App() {
                             className="hover:bg-[#F8FAFC] transition-colors group cursor-pointer"
                           >
                             <td className="px-6 py-4">
+                              <div className="flex items-center gap-3">
+                                <div className="bg-slate-100 p-2 rounded-lg group-hover:bg-white transition-colors">
+                                  <User className="w-4 h-4 text-slate-500" />
+                                </div>
+                                <span className="font-medium text-[#1E293B] truncate max-w-[200px]">
+                                  {item.CLIENTE ? (String(item.CLIENTE).length > 25 ? String(item.CLIENTE).substring(0, 25) + "..." : item.CLIENTE) : "N/A"}
+                                </span>
+                              </div>
+                            </td>
+                            <td className="px-6 py-4">
                               <div className="flex items-center gap-2 text-sm font-medium text-[#475569]">
                                 <Calendar className="w-4 h-4 text-blue-500" />
                                 <span>{item.DATA ? (typeof item.DATA === 'number' ? XLSX.SSF.format('dd/mm/yyyy', item.DATA) : item.DATA) : "-"}</span>
                               </div>
                             </td>
                             <td className="px-6 py-4">
-                              <div className="flex items-center gap-2 text-xs text-[#64748B]">
-                                <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-500" />
-                                <span>{stats.lastUpdated ? new Date(stats.lastUpdated).toLocaleDateString("pt-BR") : "-"}</span>
-                              </div>
-                            </td>
-                            <td className="px-6 py-4">
-                              <div className="flex flex-col">
-                                <span className="font-bold text-[#0F172A]">{item.PEDIDO || "-"}</span>
-                                <span className="text-[10px] text-[#64748B]">Lote: {item.LOTE || "-"}</span>
-                              </div>
-                            </td>
-                            <td className="px-6 py-4">
-                              <div className="flex items-center gap-3">
-                                <div className="bg-slate-100 p-2 rounded-lg group-hover:bg-white transition-colors">
-                                  <User className="w-4 h-4 text-slate-500" />
-                                </div>
-                                <div className="flex flex-col max-w-[200px]">
-                                  <span className="font-medium text-[#1E293B] truncate">
-                                    {item.CLIENTE ? (String(item.CLIENTE).length > 25 ? String(item.CLIENTE).substring(0, 25) + "..." : item.CLIENTE) : "N/A"}
-                                  </span>
-                                  <span className="text-xs text-[#64748B] truncate">{item.CANAL || "-"}</span>
-                                </div>
-                              </div>
-                            </td>
-                            <td className="px-6 py-4">
-                              <div className="flex items-center gap-2 text-[#64748B]">
-                                <MapPin className="w-4 h-4 shrink-0" />
-                                <div className="flex flex-col text-xs">
-                                  <span className="font-medium text-[#1E293B]">{item.CIDADE || "-"}</span>
-                                  <span>{item.BAIRRO || "-"}</span>
-                                </div>
-                              </div>
+                              <span className="font-bold text-[#0F172A]">{item.PEDIDO || "-"}</span>
                             </td>
                             <td className="px-6 py-4">
                               <span className="text-sm text-[#475569]">{item.VENDEDOR || "-"}</span>
                             </td>
                             <td className="px-6 py-4">
-                              <div className="flex flex-col gap-1">
-                                <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-50 text-blue-700 border border-blue-100">
-                                  Rota: {item.ROTA || "-"}
-                                </span>
-                                {item.OBS_SHEET && (
-                                  <span className="text-[10px] text-[#94A3B8] italic truncate max-w-[120px]">
-                                    {item.OBS_SHEET}
-                                  </span>
-                                )}
-                              </div>
+                              <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${
+                                item.SITUACAO === 'MONTADO' ? 'bg-emerald-50 text-emerald-700 border border-emerald-100' : 'bg-blue-50 text-blue-700 border border-blue-100'
+                              }`}>
+                                {item.SITUACAO || "-"}
+                              </span>
                             </td>
                           </motion.tr>
                         ))
                       ) : (
                         <tr>
-                          <td colSpan={7} className="px-6 py-12 text-center">
+                          <td colSpan={5} className="px-6 py-12 text-center">
                             <div className="bg-slate-50 w-16 h-16 rounded-full flex items-center justify-center mx-auto mb-4">
                               <AlertCircle className="text-slate-400 w-8 h-8" />
                             </div>

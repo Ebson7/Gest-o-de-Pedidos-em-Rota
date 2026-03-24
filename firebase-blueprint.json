@@ -19,9 +19,11 @@
         "PESO": { "type": "number" },
         "VALOR": { "type": "number" },
         "CANAL": { "type": "string" },
-        "DATA": { "type": "string" }
+        "DATA": { "type": "string" },
+        "SITUACAO": { "type": "string" },
+        "syncDate": { "type": "string" }
       },
-      "required": ["PEDIDO", "CLIENTE"]
+      "required": ["PEDIDO", "CLIENTE", "syncDate"]
     },
     "Stats": {
       "title": "Stats",

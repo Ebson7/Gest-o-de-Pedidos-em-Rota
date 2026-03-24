@@ -15,7 +15,6 @@
         "CLIENTE": { "type": "string" },
         "ENDERECO": { "type": "string" },
         "BAIRRO": { "type": "string" },
-        "CIDADE": { "type": "string" },
         "PESO": { "type": "number" },
         "VALOR": { "type": "number" },
         "CANAL": { "type": "string" },

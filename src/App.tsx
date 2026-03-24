@@ -117,7 +117,6 @@ interface OrderData {
   CLIENTE?: string;
   ENDERECO?: string;
   BAIRRO?: string;
-  CIDADE?: string;
   PESO?: number;
   VALOR?: number;
   CANAL?: string;
@@ -203,10 +202,8 @@ function App() {
   }, []);
 
   const filteredStats = React.useMemo(() => {
-    const uniqueCities = new Set(results.map(r => r.CIDADE).filter(Boolean));
     return {
-      count: results.length,
-      cities: uniqueCities.size
+      count: results.length
     };
   }, [results]);
 
@@ -325,8 +322,7 @@ function App() {
     
     const exportData = results.map((item) => ({
       "Número do Pedido": item.PEDIDO || "-",
-      "Nome do Cliente": item.CLIENTE ? (String(item.CLIENTE).length > 25 ? String(item.CLIENTE).substring(0, 25) : String(item.CLIENTE)) : "-",
-      "Cidade": item.CIDADE || "-"
+      "Nome do Cliente": item.CLIENTE ? (String(item.CLIENTE).length > 25 ? String(item.CLIENTE).substring(0, 25) : String(item.CLIENTE)) : "-"
     }));
 
     const worksheet = XLSX.utils.json_to_sheet(exportData);
@@ -391,7 +387,7 @@ function App() {
           if (upperKey === "SIT.CARGA" || upperKey === "SITUACAO" || upperKey === "SITUAÇÃO") mappedKey = "SITUACAO";
 
           // Normalizar campos de busca para string
-          if (["PEDIDO", "VENDEDOR", "LOTE", "CLIENTE", "CIDADE", "DATA"].includes(mappedKey)) {
+          if (["PEDIDO", "VENDEDOR", "LOTE", "CLIENTE", "DATA"].includes(mappedKey)) {
             value = value !== undefined && value !== null ? String(value).trim() : "";
           }
           newItem[mappedKey] = value;
@@ -474,7 +470,7 @@ function App() {
               if (upperKey === "VALOR TOTAL" || upperKey === "VALOR") mappedKey = "VALOR";
               if (upperKey === "SIT.CARGA" || upperKey === "SITUACAO" || upperKey === "SITUAÇÃO") mappedKey = "SITUACAO";
 
-              if (["PEDIDO", "VENDEDOR", "LOTE", "CLIENTE", "CIDADE", "DATA"].includes(mappedKey)) {
+              if (["PEDIDO", "VENDEDOR", "LOTE", "CLIENTE", "DATA"].includes(mappedKey)) {
                 value = value !== undefined && value !== null ? String(value).trim() : "";
               }
               newItem[mappedKey] = value;
@@ -615,7 +611,7 @@ function App() {
 
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {/* Stats Bar */}
-        <div className="mb-8 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="mb-8 grid grid-cols-1 sm:grid-cols-3 gap-4">
           <div className="bg-white p-4 rounded-2xl border border-[#E2E8F0] shadow-sm flex items-center gap-4">
             <div className="bg-blue-50 p-3 rounded-xl">
               <Package className="text-blue-600 w-5 h-5" />
@@ -643,15 +639,6 @@ function App() {
             <div>
               <p className="text-xs font-medium text-[#64748B] uppercase tracking-wider">Pedidos Filtrados</p>
               <p className="text-xl font-bold text-[#0F172A]">{filteredStats.count.toLocaleString()}</p>
-            </div>
-          </div>
-          <div className="bg-white p-4 rounded-2xl border border-[#E2E8F0] shadow-sm flex items-center gap-4">
-            <div className="bg-purple-50 p-3 rounded-xl">
-              <MapPin className="text-purple-600 w-5 h-5" />
-            </div>
-            <div>
-              <p className="text-xs font-medium text-[#64748B] uppercase tracking-wider">Cidades Filtradas</p>
-              <p className="text-xl font-bold text-[#0F172A]">{filteredStats.cities.toLocaleString()}</p>
             </div>
           </div>
         </div>
@@ -923,7 +910,7 @@ function App() {
                     Estrutura Esperada (Colunas)
                   </h3>
                   <div className="flex flex-wrap gap-2">
-                    {["ROTA", "PEDIDO", "CLIENTE", "CIDADE", "VENDEDOR", "PESO", "DATA"].map(col => (
+                    {["ROTA", "PEDIDO", "CLIENTE", "VENDEDOR", "PESO", "DATA"].map(col => (
                       <span key={col} className="px-2 py-1 bg-white border border-[#E2E8F0] rounded-lg text-[10px] font-mono text-[#64748B]">
                         {col}
                       </span>

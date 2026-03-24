@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, Component } from "react";
-import { Search, Upload, FileSpreadsheet, Package, MapPin, User, DollarSign, Calendar, AlertCircle, CheckCircle2, Loader2, ChevronRight, ChevronLeft, Filter, Download, Lock, LogOut, RefreshCw, Trash2, FileText } from "lucide-react";
+import { Search, Upload, FileSpreadsheet, Package, MapPin, User, DollarSign, Calendar, AlertCircle, CheckCircle2, Loader2, ChevronRight, ChevronLeft, Filter, Lock, LogOut, RefreshCw, Trash2, FileText } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import * as XLSX from "xlsx";
 import jsPDF from "jspdf";
@@ -326,20 +326,6 @@ function App() {
     setActiveTab("search");
   };
 
-  const handleExport = () => {
-    if (results.length === 0) return;
-    
-    const exportData = results.map((item) => ({
-      "Número do Pedido": item.PEDIDO || "-",
-      "Nome do Cliente": item.CLIENTE ? (String(item.CLIENTE).length > 25 ? String(item.CLIENTE).substring(0, 25) : String(item.CLIENTE)) : "-"
-    }));
-
-    const worksheet = XLSX.utils.json_to_sheet(exportData);
-    const workbook = XLSX.utils.book_new();
-    XLSX.utils.book_append_sheet(workbook, worksheet, "Resumo");
-    XLSX.writeFile(workbook, `Resumo_Pedidos_${new Date().getTime()}.xlsx`);
-  };
-
   const handleExportPDF = () => {
     if (results.length === 0) return;
 
@@ -356,7 +342,7 @@ function App() {
     const tableRows = results.map(item => [
       item.ROTA || "-",
       item.PEDIDO || "-",
-      item.CLIENTE ? (String(item.CLIENTE).length > 30 ? String(item.CLIENTE).substring(0, 30) + "..." : String(item.CLIENTE)) : "-",
+      item.CLIENTE ? (String(item.CLIENTE).length > 20 ? String(item.CLIENTE).substring(0, 20) + "..." : String(item.CLIENTE)) : "-",
       item.DATA || "-",
       item.SITUACAO || "-"
     ]);
@@ -784,22 +770,13 @@ function App() {
                       </select>
                       <div className="flex gap-2">
                         <button
-                          onClick={handleExport}
-                          disabled={results.length === 0}
-                          className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-3 rounded-2xl font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
-                          title="Exportar Excel"
-                        >
-                          <Download className="w-5 h-5" />
-                          Excel
-                        </button>
-                        <button
                           onClick={handleExportPDF}
                           disabled={results.length === 0}
                           className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white px-6 py-3 rounded-2xl font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
                           title="Exportar PDF"
                         >
                           <FileText className="w-5 h-5" />
-                          PDF
+                          Exportar PDF
                         </button>
                       </div>
                     </div>

@@ -1,7 +1,9 @@
 import React, { useState, useEffect, useCallback, Component } from "react";
-import { Search, Upload, FileSpreadsheet, Package, MapPin, User, DollarSign, Calendar, AlertCircle, CheckCircle2, Loader2, ChevronRight, ChevronLeft, Filter, Download, Lock, LogOut, RefreshCw, Trash2 } from "lucide-react";
+import { Search, Upload, FileSpreadsheet, Package, MapPin, User, DollarSign, Calendar, AlertCircle, CheckCircle2, Loader2, ChevronRight, ChevronLeft, Filter, Download, Lock, LogOut, RefreshCw, Trash2, FileText } from "lucide-react";
 import { motion, AnimatePresence } from "motion/react";
 import * as XLSX from "xlsx";
+import jsPDF from "jspdf";
+import autoTable from "jspdf-autotable";
 import { auth, db, loginAnonymously } from "./firebase";
 import { onAuthStateChanged, signOut, User as FirebaseUser } from "firebase/auth";
 import { collection, query, where, onSnapshot, limit, doc, getDoc, getDocFromServer } from "firebase/firestore";
@@ -248,7 +250,13 @@ function App() {
       
       // Filtro de Vendedor (feito no cliente para evitar necessidade de índices compostos no Firestore)
       if (user?.role === "vendedor" && user.vendorCode) {
-        data = data.filter(item => String(item.VENDEDOR) === String(user.vendorCode));
+        const code = String(user.vendorCode).toLowerCase();
+        data = data.filter(item => {
+          const vendorValue = String(item.VENDEDOR || "").toLowerCase();
+          // Verifica se o campo VENDEDOR começa com o código (ex: "1019" em "1019-FERNANDO")
+          // ou se é exatamente igual ao código
+          return vendorValue.startsWith(code) || vendorValue === code;
+        });
       }
 
       if (queryStr) {
@@ -294,7 +302,7 @@ function App() {
         }
       }
     } else if (password.toLowerCase().startsWith("marsil-")) {
-      const parts = password.split("-");
+      const parts = password.toLowerCase().split("-");
       if (parts.length >= 2 && parts[1].trim()) {
         try {
           await loginAnonymously();
@@ -330,6 +338,40 @@ function App() {
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, "Resumo");
     XLSX.writeFile(workbook, `Resumo_Pedidos_${new Date().getTime()}.xlsx`);
+  };
+
+  const handleExportPDF = () => {
+    if (results.length === 0) return;
+
+    const doc = new jsPDF();
+    
+    // Add title
+    doc.setFontSize(18);
+    doc.text("Relatório de Pedidos - Marsil", 14, 22);
+    doc.setFontSize(11);
+    doc.setTextColor(100);
+    doc.text(`Gerado em: ${new Date().toLocaleString("pt-BR")}`, 14, 30);
+
+    const tableColumn = ["Rota", "Pedido", "Cliente", "Data", "Situação"];
+    const tableRows = results.map(item => [
+      item.ROTA || "-",
+      item.PEDIDO || "-",
+      item.CLIENTE ? (String(item.CLIENTE).length > 30 ? String(item.CLIENTE).substring(0, 30) + "..." : String(item.CLIENTE)) : "-",
+      item.DATA || "-",
+      item.SITUACAO || "-"
+    ]);
+
+    autoTable(doc, {
+      head: [tableColumn],
+      body: tableRows,
+      startY: 40,
+      styles: { fontSize: 8, cellPadding: 2 },
+      headStyles: { fillColor: [37, 99, 235], textColor: 255 },
+      alternateRowStyles: { fillColor: [248, 250, 252] },
+      margin: { top: 40 },
+    });
+
+    doc.save(`Relatorio_Pedidos_${new Date().getTime()}.pdf`);
   };
 
   useEffect(() => {
@@ -577,7 +619,7 @@ function App() {
               <Lock className="text-white w-8 h-8" />
             </div>
             <h1 className="text-3xl font-bold text-[#0F172A]">Acesso Restrito</h1>
-            <p className="text-[#64748B]">Entre com sua senha para acessar o sistema Marsil.</p>
+            <p className="text-[#64748B]">Entre com sua senha de administrador ou RCA (marsil-CÓDIGO).</p>
           </div>
 
           <form onSubmit={handleLogin} className="space-y-6">
@@ -585,7 +627,7 @@ function App() {
               <label className="text-sm font-bold text-[#1E293B] ml-1">Senha</label>
               <input
                 type="password"
-                placeholder="Sua senha de acesso"
+                placeholder="Ex: marsil-1019"
                 className="w-full px-6 py-4 bg-[#F8FAFC] border border-[#E2E8F0] rounded-2xl focus:ring-2 focus:ring-blue-500 outline-none transition-all text-lg"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
@@ -726,29 +768,41 @@ function App() {
                       }}
                     />
                   </div>
-                  <div className="flex items-center gap-2">
-                    <Filter className="text-[#64748B] w-5 h-5" />
-                    <select
-                      className="bg-[#F8FAFC] border border-[#E2E8F0] rounded-2xl px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-blue-500"
-                      value={searchField}
-                      onChange={(e) => {
-                        setSearchField(e.target.value);
-                      }}
-                    >
-                      <option value="">Todos os campos</option>
-                      {fields.map(f => (
-                        <option key={f.value} value={f.value}>{f.label}</option>
-                      ))}
-                    </select>
-                    <button
-                      onClick={handleExport}
-                      disabled={results.length === 0}
-                      className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-3 rounded-2xl font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
-                    >
-                      <Download className="w-5 h-5" />
-                      Exportar
-                    </button>
-                  </div>
+                    <div className="flex items-center gap-2">
+                      <Filter className="text-[#64748B] w-5 h-5" />
+                      <select
+                        className="bg-[#F8FAFC] border border-[#E2E8F0] rounded-2xl px-4 py-3 text-sm font-medium outline-none focus:ring-2 focus:ring-blue-500"
+                        value={searchField}
+                        onChange={(e) => {
+                          setSearchField(e.target.value);
+                        }}
+                      >
+                        <option value="">Todos os campos</option>
+                        {fields.map(f => (
+                          <option key={f.value} value={f.value}>{f.label}</option>
+                        ))}
+                      </select>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={handleExport}
+                          disabled={results.length === 0}
+                          className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-700 text-white px-6 py-3 rounded-2xl font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+                          title="Exportar Excel"
+                        >
+                          <Download className="w-5 h-5" />
+                          Excel
+                        </button>
+                        <button
+                          onClick={handleExportPDF}
+                          disabled={results.length === 0}
+                          className="flex items-center gap-2 bg-red-600 hover:bg-red-700 text-white px-6 py-3 rounded-2xl font-bold transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-sm"
+                          title="Exportar PDF"
+                        >
+                          <FileText className="w-5 h-5" />
+                          PDF
+                        </button>
+                      </div>
+                    </div>
                 </div>
               </div>
 

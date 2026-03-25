@@ -253,9 +253,10 @@ function App() {
         const code = String(user.vendorCode).toLowerCase();
         data = data.filter(item => {
           const vendorValue = String(item.VENDEDOR || "").toLowerCase();
-          // Verifica se o campo VENDEDOR começa com o código (ex: "1019" em "1019-FERNANDO")
-          // ou se é exatamente igual ao código
-          return vendorValue.startsWith(code) || vendorValue === code;
+          // Verifica se o campo VENDEDOR é exatamente o código (ex: "3")
+          // ou se começa com o código seguido de um hífen (ex: "3-FERNANDO")
+          // Isso evita que o código "3" filtre por engano o vendedor "30"
+          return vendorValue === code || vendorValue.startsWith(code + "-");
         });
       }
 
